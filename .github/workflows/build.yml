@@ -74,13 +74,14 @@ jobs:
       with:
         arch: x64
 
-    - name: Bootstrap vcpkg
-      run: |
-        if [ "$RUNNER_OS" = "Windows" ]; then
-          "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
-        else
-          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
-        fi
+    - name: Bootstrap vcpkg (Windows)
+      if: runner.os == 'Windows'
+      shell: cmd
+      run: call "%VCPKG_ROOT%\bootstrap-vcpkg.bat" -disableMetrics
+
+    - name: Bootstrap vcpkg (Linux, macOS)
+      if: runner.os != 'Windows'
+      run: '"$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics'
 
     - name: Compiler versions
       run: |
