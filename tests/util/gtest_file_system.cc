@@ -1,6 +1,7 @@
 // Test cases for the file system interface.
 // Written by Simon Fuhrmann.
 
+#include <filesystem>
 #include <gtest/gtest.h>
 
 #include "util/file_system.h"
@@ -45,8 +46,10 @@ TEST(FileSystemTest, DirnameTest)
 
 TEST(FileSystemTest, AbspathTest)
 {
-    EXPECT_EQ(util::fs::get_cwd_string() + "/.", util::fs::abspath("."));
-    EXPECT_EQ(util::fs::get_cwd_string() + "/../dir", util::fs::abspath(util::fs::dirname("../dir/file")));
+    // abspath() returns paths with normalized (forward) slashes.
+    std::string const cwd = util::fs::sanitize_path(util::fs::get_cwd_string());
+    EXPECT_EQ(cwd + "/.", util::fs::abspath("."));
+    EXPECT_EQ(cwd + "/../dir", util::fs::abspath(util::fs::dirname("../dir/file")));
 }
 
 TEST(FileSystemTest, IsAbsoluteTest)
@@ -89,11 +92,8 @@ TEST(FileSystemTest, ReplaceExtensionTest)
 
 TEST(FileSystemTest, TestFileIO)
 {
-#if defined(_WIN32)
-    std::string tempfile("C:/temp/tempfile.txt");
-#else
-    std::string tempfile("/tmp/tempfile.txt");
-#endif
+    std::string const tempfile = util::fs::sanitize_path(
+        (std::filesystem::temp_directory_path() / "mve_tempfile.txt").string());
 
     std::string data = "This is\na test string\n";
     util::fs::write_string_to_file(data, tempfile);

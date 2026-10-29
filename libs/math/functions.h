@@ -170,7 +170,7 @@ popcount (T const x)
     return std::bitset<sizeof(T) * 8>(x).count();
 }
 
-#ifdef _MSC_VER // MSVS fails to optimize std::bitset::count
+#if defined(_MSC_VER) && !defined(__clang__) // MSVS fails to optimize std::bitset::count
 std::size_t inline
 popcount (std::uint32_t const x)
 {

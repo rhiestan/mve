@@ -111,8 +111,10 @@ ConjugateGradient<T>::solve(Matrix const& A, Vector const& b, Vector* x,
     Matrix const* P)
 {
     CGBasicMatrixFunctor<T> A_functor(A);
+    if (P == nullptr)
+        return this->solve(A_functor, b, x, nullptr);
     CGBasicMatrixFunctor<T> P_functor(*P);
-    return this->solve(A_functor, b, x, P == nullptr ? nullptr : &P_functor);
+    return this->solve(A_functor, b, x, &P_functor);
 }
 
 template <typename T>

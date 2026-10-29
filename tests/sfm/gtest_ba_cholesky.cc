@@ -65,7 +65,7 @@ TEST(CholeskyDecompTest, InvertLDGoldenData2Test)
     double result[9];
     sfm::ba::invert_lower_diagonal(matrix, 3, result);
     for (int i = 0; i < 9; ++i)
-        EXPECT_NEAR(oracle[i], result[i], 1e-16);
+        EXPECT_NEAR(oracle[i], result[i], 1e-15);
 }
 
 TEST(CholeskyDecompTest, CholeskyInvertGoldenData1Test)

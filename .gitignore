@@ -22,3 +22,7 @@ apps/scene2pset/scene2pset
 apps/sceneupgrade/sceneupgrade
 apps/sfmrecon/sfmrecon
 apps/umve/umve
+
+# CMake build trees
+build/
+CMakeUserPresets.json

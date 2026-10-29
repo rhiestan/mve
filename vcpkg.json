@@ -1,0 +1,16 @@
+{
+  "name": "mve",
+  "version-string": "0.0.0",
+  "description": "Multi-View Environment (command-line tools)",
+  "dependencies": [
+    "libjpeg-turbo",
+    "libpng",
+    {
+      "name": "tiff",
+      "default-features": false,
+      "features": [ "jpeg", "zip" ]
+    },
+    "zlib",
+    "gtest"
+  ]
+}
