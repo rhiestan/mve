@@ -31,10 +31,19 @@
       }
     },
     {
+      "name": "windows-clang-ci",
+      "inherits": "windows-clang",
+      "displayName": "Windows, Clang (MSVC target), CI (Visual Studio from the environment)",
+      "environment": {
+        "VCPKG_VISUAL_STUDIO_PATH": "$penv{VSINSTALLDIR}"
+      }
+    },
+    {
       "name": "linux-clang",
       "inherits": "base",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "VCPKG_TARGET_TRIPLET": "x64-linux"
       }
@@ -50,11 +59,13 @@
   ],
   "buildPresets": [
     { "name": "windows-clang", "configurePreset": "windows-clang" },
+    { "name": "windows-clang-ci", "configurePreset": "windows-clang-ci" },
     { "name": "linux-clang", "configurePreset": "linux-clang" },
     { "name": "macos-clang", "configurePreset": "macos-clang" }
   ],
   "testPresets": [
     { "name": "windows-clang", "configurePreset": "windows-clang", "output": { "outputOnFailure": true } },
+    { "name": "windows-clang-ci", "configurePreset": "windows-clang-ci", "output": { "outputOnFailure": true } },
     { "name": "linux-clang", "configurePreset": "linux-clang", "output": { "outputOnFailure": true } },
     { "name": "macos-clang", "configurePreset": "macos-clang", "output": { "outputOnFailure": true } }
   ]

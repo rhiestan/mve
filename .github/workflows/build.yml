@@ -1,0 +1,192 @@
+name: Build command-line tools
+
+# Builds the command-line tools (not the Qt GUI) with CMake, Ninja, Clang and
+# vcpkg on Windows, Linux and macOS, and runs the unit tests. When a tag is
+# pushed, the tools are packaged, uploaded as workflow artifacts and attached
+# to a GitHub release.
+
+on:
+  push:
+    branches: [ "master" ]
+    tags: [ "*" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Must match the "builtin-baseline" in vcpkg.json.
+  VCPKG_COMMIT: d4c0a46cb8f63e5c9fa007d13baf1cb3e43bf7e3
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - { name: "Windows x64, Clang", os: windows-2022, preset: windows-clang-ci, suffix: windows-x64 }
+        - { name: "Linux x64, Clang",   os: ubuntu-22.04, preset: linux-clang,      suffix: linux-x64 }
+        - { name: "macOS arm64, Clang", os: macos-14,     preset: macos-clang,      suffix: macos-arm64 }
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Check out vcpkg
+      uses: actions/checkout@v6
+      with:
+        repository: microsoft/vcpkg
+        ref: ${{ env.VCPKG_COMMIT }}
+        path: vcpkg
+
+    - name: Cache vcpkg binary packages
+      uses: actions/cache@v4
+      with:
+        path: .vcpkg-cache
+        key: vcpkg-${{ matrix.suffix }}-${{ hashFiles('vcpkg.json') }}
+        restore-keys: vcpkg-${{ matrix.suffix }}-
+
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          autoconf automake clang libomp-dev libtool nasm ninja-build \
+          patchelf pkg-config zip
+
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      run: brew install -q autoconf automake libomp libtool nasm ninja
+
+    - name: Set up the Visual Studio environment
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Bootstrap vcpkg
+      run: |
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+        else
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+        fi
+
+    - name: Compiler versions
+      run: |
+        clang --version
+        cmake --version
+        ninja --version
+
+    - name: Configure
+      run: |
+        extra=()
+        if [ "$RUNNER_OS" = "macOS" ]; then
+          # Apple Clang ships without OpenMP; use Homebrew's libomp.
+          omp="$(brew --prefix libomp)"
+          extra+=("-DOpenMP_CXX_FLAGS=-Xclang -fopenmp -I${omp}/include")
+          extra+=("-DOpenMP_CXX_LIB_NAMES=omp")
+          extra+=("-DOpenMP_omp_LIBRARY=${omp}/lib/libomp.dylib")
+        fi
+        cmake --preset ${{ matrix.preset }} "${extra[@]}"
+
+    - name: Build
+      run: cmake --build --preset ${{ matrix.preset }}
+
+    - name: Test
+      run: ctest --preset ${{ matrix.preset }}
+
+    # ---- Packaging, tags only ------------------------------------------
+
+    - name: Install
+      if: startsWith(github.ref, 'refs/tags/')
+      run: cmake --install build/${{ matrix.preset }} --prefix stage/mve-${{ matrix.suffix }}
+
+    - name: Bundle the OpenMP runtime (Linux)
+      if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+      working-directory: stage/mve-${{ matrix.suffix }}/bin
+      run: |
+        omp="$(ldd dmrecon | awk '/libomp/ { print $3; exit }')"
+        echo "OpenMP runtime: ${omp}"
+        cp -L "${omp}" .
+        for exe in $(find . -maxdepth 1 -type f -perm -u+x ! -name '*.so*'); do
+          patchelf --set-rpath '$ORIGIN' "$exe"
+        done
+
+    - name: Bundle the OpenMP runtime (macOS)
+      if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
+      working-directory: stage/mve-${{ matrix.suffix }}/bin
+      run: |
+        omp="$(otool -L dmrecon | awk '/libomp/ { print $1; exit }')"
+        echo "OpenMP runtime: ${omp}"
+        cp -L "${omp}" libomp.dylib
+        chmod u+w libomp.dylib
+        install_name_tool -id @loader_path/libomp.dylib libomp.dylib
+        codesign --force --sign - libomp.dylib
+        for exe in $(find . -maxdepth 1 -type f -perm -u+x ! -name '*.dylib'); do
+          install_name_tool -change "${omp}" @executable_path/libomp.dylib "$exe"
+          codesign --force --sign - "$exe"
+        done
+
+    - name: Smoke test the installed tools
+      if: startsWith(github.ref, 'refs/tags/')
+      working-directory: stage/mve-${{ matrix.suffix }}/bin
+      run: |
+        # The tools print their usage and exit with 1; a missing library or
+        # a crash on startup would produce no such output.
+        out="$(./dmrecon --help 2>&1 || true)"
+        grep -q "Usage" <<< "${out}"
+        out="$(./fssrecon --help 2>&1 || true)"
+        grep -q "Floating Scale" <<< "${out}"
+
+    - name: Create archive
+      if: startsWith(github.ref, 'refs/tags/')
+      working-directory: stage
+      run: |
+        cp ../LICENSE.txt mve-${{ matrix.suffix }}/
+        name="mve-${{ github.ref_name }}-${{ matrix.suffix }}"
+        mv mve-${{ matrix.suffix }} "${name}"
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          7z a -tzip "${name}.zip" "${name}"
+        else
+          tar czf "${name}.tar.gz" "${name}"
+        fi
+
+    - name: Upload artifact
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/upload-artifact@v4
+      with:
+        name: mve-${{ matrix.suffix }}
+        path: |
+          stage/*.zip
+          stage/*.tar.gz
+        if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
+
+    - name: Create GitHub release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: artifacts/*
+        generate_release_notes: true
