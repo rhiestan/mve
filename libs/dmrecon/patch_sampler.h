@@ -124,12 +124,13 @@ private:
     /** pixel colors of patch in master image */
     Samples masterColorSamples;
 
-    /** samples in neighbor images */
-    std::map<std::size_t, Samples> neighColorSamples;
-    std::map<std::size_t, Samples> neighDerivSamples;
-    std::map<std::size_t, PixelCoords> neighPosSamples;
+    /** samples in neighbor images, indexed by view ID */
+    std::vector<Samples> neighColorSamples;
+    std::vector<PixelCoords> neighPosSamples;
+    std::vector<float> stepSize;
 
-    std::map<std::size_t, float> stepSize;
+    /** scratch buffer for gradient directions (avoids reallocation) */
+    PixelCoords gradDir;
 
     void computePatchPoints();
     void computeMasterSamples();

@@ -31,6 +31,10 @@ PatchSampler::PatchSampler(std::vector<SingleView::Ptr> const& _views,
     SingleView::Ptr refV(views[settings.refViewNr]);
     mve::ByteImage::ConstPtr masterImg(refV->getScaledImg());
 
+    neighColorSamples.resize(views.size());
+    neighPosSamples.resize(views.size());
+    stepSize.resize(views.size(), 0.f);
+
     offset = settings.filterWidth / 2;
     nrSamples = sqr(settings.filterWidth);
 
@@ -106,7 +110,7 @@ PatchSampler::fastColAndDeriv(std::size_t v, Samples& color, Samples& deriv)
 
     /* compute image position and gradient direction for each sample
        point in neighbor image v */
-    std::vector<math::Vec2f> gradDir(nrSamples);
+    gradDir.resize(nrSamples);
     for (std::size_t i = 0; i < nrSamples; ++i)
     {
         math::Vec3f p0(patchPoints[i]);
@@ -126,8 +130,10 @@ PatchSampler::fastColAndDeriv(std::size_t v, Samples& color, Samples& deriv)
     colAndExactDeriv(*img, imgPos, gradDir, color, deriv);
 
     /* normalize the gradient */
+    float const step = stepSize[v];
     for (std::size_t i = 0; i < nrSamples; ++i)
-        deriv[i] /= stepSize[v];
+        for (int c = 0; c < 3; ++c)
+            deriv[i][c] /= step;
 
     success[v] = true;
 }
@@ -140,19 +146,19 @@ PatchSampler::getFastNCC(std::size_t v)
     if (!success[v])
         return -1.f;
     assert(success[settings.refViewNr]);
+    Samples const& nCol = neighColorSamples[v];
     math::Vec3f meanY(0.f);
     for (std::size_t i = 0; i < nrSamples; ++i)
-        meanY += neighColorSamples[v][i];
+        meanY += nCol[i];
     meanY /= (float) nrSamples;
 
     float sqrDevY = 0.f;
     float devXY = 0.f;
     for (std::size_t i = 0; i < nrSamples; ++i)
     {
-        sqrDevY += (neighColorSamples[v][i] - meanY).square_norm();
+        sqrDevY += (nCol[i] - meanY).square_norm();
         // Note: master color samples are normalized!
-        devXY += (masterColorSamples[i] - meanX)
-            .dot(neighColorSamples[v][i] - meanY);
+        devXY += (masterColorSamples[i] - meanX).dot(nCol[i] - meanY);
     }
     float tmp = sqrt(sqrDevX * sqrDevY);
     assert(!MATH_ISNAN(tmp) && !MATH_ISNAN(devXY));
@@ -265,9 +271,9 @@ PatchSampler::update(float newDepth, float newDzI, float newDzJ)
     dzJ = newDzJ;
     success[settings.refViewNr] = true;
     computePatchPoints();
-    neighColorSamples.clear();
-    neighDerivSamples.clear();
-    neighPosSamples.clear();
+    /* Keep the allocated memory of the per-view buffers for reuse. */
+    for (Samples& samples : neighColorSamples)
+        samples.clear();
 }
 
 void
@@ -333,7 +339,8 @@ PatchSampler::computeMasterSamples()
        channels is 1 and compute mean color afterwards */
     for (std::size_t i = 0; i < nrSamples; ++i)
     {
-        masterColorSamples[i] /= masterMeanCol;
+        for (int c = 0; c < 3; ++c)
+            masterColorSamples[i][c] /= masterMeanCol;
         meanX += masterColorSamples[i];
     }
     meanX /= nrSamples;

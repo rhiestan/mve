@@ -63,7 +63,8 @@ private:
 
     float depth;
     float dzI, dzJ;                 // represents patch normal
-    std::map<std::size_t, math::Vec3f, std::less<std::size_t> > colorScale;
+    /** Per-channel color scale for each view, indexed by view ID. */
+    std::vector<math::Vec3f> colorScale;
     Status status;
 
     PatchSampler::Ptr sampler;

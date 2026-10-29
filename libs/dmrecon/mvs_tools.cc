@@ -94,52 +94,53 @@ namespace
 
 }
 
+/** Floor for float -> int conversion without a libm call. */
+inline int
+fast_floor (float v)
+{
+    int const i = static_cast<int>(v);
+    return i - (v < static_cast<float>(i) ? 1 : 0);
+}
+
 void
 colAndExactDeriv(mve::ByteImage const& img, PixelCoords const& imgPos,
     PixelCoords const& gradDir, Samples& color, Samples& deriv)
 {
     int const width = img.width();
     int const height = img.height();
+    uint8_t const* data = &img.at(0);
     for (std::size_t i = 0; i < imgPos.size(); ++i)
     {
-        int const left = std::floor(imgPos[i][0]);
-        int const top = std::floor(imgPos[i][1]);
+        int const left = fast_floor(imgPos[i][0]);
+        int const top = fast_floor(imgPos[i][1]);
         float const x = imgPos[i][0] - left;
         float const y = imgPos[i][1] - top;
 
         if (left < 0 || left > width-1 || top < 0 || top > height-1)
             throw std::runtime_error("Image position out of bounds");
 
-        /* data position pointer */
-        int p0 = (top * width + left) * 3;
-        int p1 = ((top+1) * width + left) * 3;
+        /* data position pointers */
+        uint8_t const* p0 = data + (top * width + left) * 3;
+        uint8_t const* p1 = data + ((top+1) * width + left) * 3;
+        float const u = gradDir[i][0];
+        float const v = gradDir[i][1];
 
-        /* bilinear interpolation to determine color value */
-        float x0, x1, x2, x3, x4, x5;
-        x0 = (1.f-x) * srgb2lin[img.at(p0  )] + x * srgb2lin[img.at(p0+3)];
-        x1 = (1.f-x) * srgb2lin[img.at(p0+1)] + x * srgb2lin[img.at(p0+4)];
-        x2 = (1.f-x) * srgb2lin[img.at(p0+2)] + x * srgb2lin[img.at(p0+5)];
-        x3 = (1.f-x) * srgb2lin[img.at(p1  )] + x * srgb2lin[img.at(p1+3)];
-        x4 = (1.f-x) * srgb2lin[img.at(p1+1)] + x * srgb2lin[img.at(p1+4)];
-        x5 = (1.f-x) * srgb2lin[img.at(p1+2)] + x * srgb2lin[img.at(p1+5)];
-
-        color[i][0] = (1.f - y) * x0 + y * x3;
-        color[i][1] = (1.f - y) * x1 + y * x4;
-        color[i][2] = (1.f - y) * x2 + y * x5;
-
-        /* derivative in direction gradDir */
-        float u = gradDir[i][0];
-        float v = gradDir[i][1];
         for (int c = 0; c < 3; ++c)
         {
-            deriv[i][c] =
-                u * (srgb2lin[img.at(p0+3)] - srgb2lin[img.at(p0)])
-                + v * (srgb2lin[img.at(p1)] - srgb2lin[img.at(p0)])
-                + (v * x + u * y) *
-                    (srgb2lin[img.at(p0)] - srgb2lin[img.at(p0+3)]
-                     - srgb2lin[img.at(p1)] + srgb2lin[img.at(p1+3)]);
-            ++p0;
-            ++p1;
+            /* the four neighboring texels of this channel */
+            float const t00 = srgb2lin[p0[c]];
+            float const t01 = srgb2lin[p0[c+3]];
+            float const t10 = srgb2lin[p1[c]];
+            float const t11 = srgb2lin[p1[c+3]];
+
+            /* bilinear interpolation to determine color value */
+            float const xa = (1.f-x) * t00 + x * t01;
+            float const xb = (1.f-x) * t10 + x * t11;
+            color[i][c] = (1.f - y) * xa + y * xb;
+
+            /* derivative in direction gradDir */
+            deriv[i][c] = u * (t01 - t00) + v * (t10 - t00)
+                + (v * x + u * y) * (t00 - t01 - t10 + t11);
         }
     }
 }
@@ -171,30 +172,27 @@ getXYZColorAtPos(mve::ByteImage const& img, PixelCoords const& imgPos,
 {
     int width = img.width();
     int height = img.height();
+    uint8_t const* data = &img.at(0);
     PixelCoords::const_iterator citPos;
     Samples::iterator itCol = color->begin();
 
     for (citPos = imgPos.begin(); citPos != imgPos.end(); ++citPos, ++itCol)
     {
-        int const i = floor((*citPos)[0]);
-        int const j = floor((*citPos)[1]);
+        int const i = fast_floor((*citPos)[0]);
+        int const j = fast_floor((*citPos)[1]);
         assert(i < width-1 && j < height-1);
+        (void)width; (void)height;
 
         float const u = (*citPos)[0] - i;
         float const v = (*citPos)[1] - j;
-        int const p0 = (j * width + i) * 3;
-        int const p1 = ((j+1) * width + i) * 3;
-        float x0, x1, x2, x3, x4, x5;
-        x0 = (1.f-u) * srgb2lin[img.at(p0  )] + u * srgb2lin[img.at(p0+3)];
-        x1 = (1.f-u) * srgb2lin[img.at(p0+1)] + u * srgb2lin[img.at(p0+4)];
-        x2 = (1.f-u) * srgb2lin[img.at(p0+2)] + u * srgb2lin[img.at(p0+5)];
-        x3 = (1.f-u) * srgb2lin[img.at(p1  )] + u * srgb2lin[img.at(p1+3)];
-        x4 = (1.f-u) * srgb2lin[img.at(p1+1)] + u * srgb2lin[img.at(p1+4)];
-        x5 = (1.f-u) * srgb2lin[img.at(p1+2)] + u * srgb2lin[img.at(p1+5)];
-
-        (*itCol)[0] = (1.f - v) * x0 + v * x3;
-        (*itCol)[1] = (1.f - v) * x1 + v * x4;
-        (*itCol)[2] = (1.f - v) * x2 + v * x5;
+        uint8_t const* p0 = data + (j * width + i) * 3;
+        uint8_t const* p1 = data + ((j+1) * width + i) * 3;
+        for (int c = 0; c < 3; ++c)
+        {
+            float const xa = (1.f-u) * srgb2lin[p0[c]] + u * srgb2lin[p0[c+3]];
+            float const xb = (1.f-u) * srgb2lin[p1[c]] + u * srgb2lin[p1[c+3]];
+            (*itCol)[c] = (1.f - v) * xa + v * xb;
+        }
     }
 }
 

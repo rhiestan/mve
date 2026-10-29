@@ -41,6 +41,7 @@ PatchOptimization::PatchOptimization(
     jj(sqr(settings.filterWidth)),
     localVS(views, settings, _globalViewIDs, _localViewIDs, sampler)
 {
+    colorScale.resize(views.size());
     status.iterationCount = 0;
     status.optiSuccess = true;
     status.converged = false;
@@ -91,17 +92,20 @@ PatchOptimization::computeColorScale()
         Samples const & nCol = sampler->getNeighColorSamples(*id);
         if (!sampler->success[*id])
             return;
-        for (int c = 0; c < 3; ++c) {
-            // for each color channel
-            float ab = 0.f;
-            float aa = 0.f;
-            for (std::size_t i = 0; i < mCol.size(); ++i) {
-                ab += (mCol[i][c] - nCol[i][c] * colorScale[*id][c]) * nCol[i][c];
-                aa += sqr(nCol[i][c]);
+        // accumulate all color channels in a single pass over the samples
+        math::Vec3f& cs = colorScale[*id];
+        float ab[3] = { 0.f, 0.f, 0.f };
+        float aa[3] = { 0.f, 0.f, 0.f };
+        for (std::size_t i = 0; i < mCol.size(); ++i) {
+            for (int c = 0; c < 3; ++c) {
+                ab[c] += (mCol[i][c] - nCol[i][c] * cs[c]) * nCol[i][c];
+                aa[c] += sqr(nCol[i][c]);
             }
-            if (std::abs(aa) > 1e-6) {
-                colorScale[*id][c] += ab / aa;
-                if (colorScale[*id][c] > 1e3)
+        }
+        for (int c = 0; c < 3; ++c) {
+            if (std::abs(aa[c]) > 1e-6) {
+                cs[c] += ab[c] / aa[c];
+                if (cs[c] > 1e3)
                     status.optiSuccess = false;
             }
             else
@@ -149,9 +153,9 @@ PatchOptimization::derivNorm()
     std::size_t nrSamples = sampler->getNrSamples();
 
     float norm(0);
+    Samples nCol, nDeriv;
     for (id = neighIDs.begin(); id != neighIDs.end(); ++id)
     {
-        Samples nCol, nDeriv;
         sampler->fastColAndDeriv(*id, nCol, nDeriv);
         if (!sampler->success[*id]) {
             status.optiSuccess = false;
@@ -271,9 +275,9 @@ PatchOptimization::optimizeDepthOnly()
     IndexSet::const_iterator id;
     std::size_t nrSamples = sampler->getNrSamples();
 
+    Samples nCol, nDeriv;
     for (id = neighIDs.begin(); id != neighIDs.end(); ++id)
     {
-        Samples nCol, nDeriv;
         sampler->fastColAndDeriv(*id, nCol, nDeriv);
         if (!sampler->success[*id]) {
             status.optiSuccess = false;
@@ -313,9 +317,9 @@ PatchOptimization::optimizeDepthAndNormal()
     math::Vec3d ATb(0.f);
     Samples const & mCol = sampler->getMasterColorSamples();
     IndexSet::const_iterator id;
+    Samples nCol, nDeriv;
     for (id = neighIDs.begin(); id != neighIDs.end(); ++id)
     {
-        Samples nCol, nDeriv;
         sampler->fastColAndDeriv(*id, nCol, nDeriv);
         if (!sampler->success[*id]) {
             status.optiSuccess = false;
