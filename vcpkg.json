@@ -10,6 +10,7 @@
       "default-features": false,
       "features": [ "jpeg", "zip" ]
     },
+    "mimalloc",
     "zlib",
     "gtest"
   ]
