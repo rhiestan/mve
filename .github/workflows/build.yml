@@ -19,7 +19,6 @@ permissions:
 env:
   # Must match the "builtin-baseline" in vcpkg.json.
   VCPKG_COMMIT: d4c0a46cb8f63e5c9fa007d13baf1cb3e43bf7e3
-  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
   VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
 
 jobs:
@@ -73,6 +72,11 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
+
+    # Set after the Visual Studio environment, which overrides VCPKG_ROOT
+    # with the vcpkg bundled in Visual Studio.
+    - name: Set VCPKG_ROOT
+      run: echo "VCPKG_ROOT=$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')/vcpkg" >> "$GITHUB_ENV"
 
     - name: Bootstrap vcpkg (Windows)
       if: runner.os == 'Windows'

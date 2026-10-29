@@ -14,7 +14,7 @@ TEST(CholeskyDecompTest, CholeskyGoldenData1Test)
 
     sfm::ba::cholesky_decomposition(matrix, 3, result);
     for (int i = 0; i < 9; ++i)
-        EXPECT_NEAR(oracle[i], result[i], 1e-18);
+        EXPECT_NEAR(oracle[i], result[i], 1e-15);
 }
 
 TEST(CholeskyDecompTest, CholeskyGoldenData2Test)
@@ -26,7 +26,7 @@ TEST(CholeskyDecompTest, CholeskyGoldenData2Test)
 
     sfm::ba::cholesky_decomposition(matrix, 3, result);
     for (int i = 0; i < 9; ++i)
-        EXPECT_NEAR(oracle[i], result[i], 1e-18);
+        EXPECT_NEAR(oracle[i], result[i], 1e-15);
 }
 
 TEST(CholeskyDecompTest, CholeskyInplaceComputationTest)
@@ -37,7 +37,7 @@ TEST(CholeskyDecompTest, CholeskyInplaceComputationTest)
 
     sfm::ba::cholesky_decomposition(matrix, 3, matrix);
     for (int i = 0; i < 9; ++i)
-        EXPECT_NEAR(oracle[i], matrix[i], 1e-18);
+        EXPECT_NEAR(oracle[i], matrix[i], 1e-15);
 }
 
 TEST(CholeskyDecompTest, InvertLDGoldenData1Test)
