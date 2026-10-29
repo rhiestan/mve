@@ -345,12 +345,9 @@ Octree::get_iterator_for_root (void) const
 
 void
 Octree::influence_query (math::Vec3d const& pos, double factor,
-    std::vector<Sample const*>* result, Iterator const& iter,
-    math::Vec3d const& parent_node_center) const
+    std::vector<Sample const*>* result, Node const* node,
+    double node_size, math::Vec3d const& node_center) const
 {
-    if (iter.current == nullptr)
-        return;
-
     /*
      * Strategy is the following: Try to rule out this octree node. Assume
      * the largest scale sample (node_size * 2) in this node and compute
@@ -364,39 +361,61 @@ Octree::influence_query (math::Vec3d const& pos, double factor,
      * - Note: Nodes can contain samples with scale values much smaller than
      *   node_size. This is because the octree depth is limited.
      */
-    /* Compute current node center based on parent's. */
-    uint32_t x = (iter.path & 1) >> 0;
-    uint32_t y = (iter.path & 2) >> 1;
-    uint32_t z = (iter.path & 4) >> 2;
-    double node_size = this->root_size / (1 << iter.level);
-    double offset = (iter.level > 0) * node_size / 2.0;
-    math::Vec3d node_center(
-        parent_node_center[0] - offset + x * node_size,
-        parent_node_center[1] - offset + y * node_size,
-        parent_node_center[2] - offset + z * node_size);
 
-    /* Estimate for the minimum distance. No sample is closer to pos. */
-    double const min_distance = (pos - node_center).norm()
-        - MATH_SQRT3 * node_size / 2.0;
-    double const max_scale = node_size * 2.0;
-    if (min_distance > max_scale * factor)
+    /* Estimate for the minimum distance. No sample is closer to pos.
+     * The test is done on squared distances to avoid the square root. */
+    double const half_diagonal = MATH_SQRT3 * node_size / 2.0;
+    double const max_scale = std::min(node_size * 2.0,
+        static_cast<double>(node->max_scale));
+    double const max_distance = max_scale * factor + half_diagonal;
+    if ((pos - node_center).square_norm() > MATH_POW2(max_distance))
         return;
 
     /* Node could not be ruled out. Test all samples. */
-    for (std::size_t i = 0; i < iter.current->samples.size(); ++i)
+    std::vector<Sample> const& samples = node->samples;
+    for (std::size_t i = 0; i < samples.size(); ++i)
     {
-        Sample const& s = iter.current->samples[i];
+        Sample const& s = samples[i];
         if ((pos - s.pos).square_norm() > MATH_POW2(factor * s.scale))
             continue;
         result->push_back(&s);
     }
 
-    /* Descend into octree. */
-    if (iter.current->children == nullptr)
+    /* Descend into octree. Halving a power of two is exact. */
+    if (node->children == nullptr)
         return;
+    double const child_size = node_size / 2.0;
+    double const offset = child_size / 2.0;
     for (int i = 0; i < 8; ++i)
-        this->influence_query(pos, factor, result, iter.descend(i),
-            node_center);
+    {
+        math::Vec3d child_center(
+            node_center[0] - offset + ((i & 1) >> 0) * child_size,
+            node_center[1] - offset + ((i & 2) >> 1) * child_size,
+            node_center[2] - offset + ((i & 4) >> 2) * child_size);
+        this->influence_query(pos, factor, result, node->children + i,
+            child_size, child_center);
+    }
+}
+
+void
+Octree::compute_subtree_scales (void)
+{
+    if (this->root != nullptr)
+        this->compute_subtree_scales(this->root);
+}
+
+float
+Octree::compute_subtree_scales (Node* node)
+{
+    float max_scale = 0.0f;
+    for (std::size_t i = 0; i < node->samples.size(); ++i)
+        max_scale = std::max(max_scale, node->samples[i].scale);
+    if (node->children != nullptr)
+        for (int i = 0; i < 8; ++i)
+            max_scale = std::max(max_scale,
+                this->compute_subtree_scales(node->children + i));
+    node->max_scale = max_scale;
+    return max_scale;
 }
 
 void

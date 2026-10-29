@@ -8,6 +8,10 @@
  */
 
 #include <iostream>
+#ifdef _OPENMP
+#   include <omp.h>
+#endif
+#include <cstdlib>
 #include <cstring>
 #include <cerrno>
 #include <fstream>
@@ -22,6 +26,7 @@
 #include "fssr/basis_function.h"
 #include "fssr/sample.h"
 #include "fssr/iso_octree.h"
+#include "fssr/sample_kernel.h"
 
 FSSR_NAMESPACE_BEGIN
 
@@ -65,6 +70,13 @@ IsoOctree::compute_all_voxels (void)
             this->voxels.push_back(std::make_pair(*i, VoxelData()));
     }
 
+    this->compute_subtree_scales();
+#ifdef FSSR_USE_HIGHWAY
+    if (char const* limit = std::getenv("FSSR_HWY_TARGET"))
+        limit_sample_kernel_target(limit);
+    std::cout << "Sample evaluation: " << (std::getenv("FSSR_SCALAR")
+        ? "scalar" : sample_kernel_target_name()) << std::endl;
+#endif
     std::cout << "Sampling the implicit function at " << this->voxels.size()
         << " positions, fetch a beer..." << std::endl;
 
@@ -78,11 +90,14 @@ IsoOctree::compute_all_voxels (void)
             this->get_root_node_center(), this->get_root_node_size());
         this->voxels[i].second = this->sample_ifn(voxel_pos);
 
-#pragma omp critical
-        {
-            num_processed += 1;
-            this->print_progress(num_processed, this->voxels.size());
-        }
+        /* Count atomically, and let a single thread print the progress. */
+        std::size_t done;
+#pragma omp atomic capture
+        done = ++num_processed;
+#ifdef _OPENMP
+        if (omp_get_thread_num() == 0)
+#endif
+            this->print_progress(done, this->voxels.size());
     }
 
     /* Print progress one last time to get the 100% progress output. */
@@ -132,31 +147,56 @@ IsoOctree::sample_ifn (math::Vec3d const& voxel_pos)
     math::Vector<double, 3> total_weight_deriv(0.0);
     math::Vector<double, 3> total_color(0.0);
 
-    for (std::size_t i = 0; i < samples.size(); ++i)
+#ifdef FSSR_USE_HIGHWAY
+    static bool const use_scalar = std::getenv("FSSR_SCALAR") != nullptr;
+    if (!use_scalar)
     {
-        Sample const& sample = *samples[i];
-        if (sample.scale > sample_max_scale)
-            continue;
+        /* SIMD kernel: gather the influencing samples, then evaluate. */
+        static thread_local SampleBatch batch;
+        batch.assign(samples, sample_max_scale, voxel_pos.begin());
 
-        /* Evaluate basis and weight function. */
-        double value, weight;
-        math::Vector<double, 3> value_deriv, weight_deriv;
-        evaluate(voxel_pos, sample, &value, &weight,
-            &value_deriv, &weight_deriv);
+        SampleTotals totals;
+        accumulate_samples(voxel_pos.begin(), batch, &totals);
+        total_value = totals.value;
+        total_weight = totals.weight;
+        total_scale = totals.scale;
+        total_color_weight = totals.color_weight;
+        for (int k = 0; k < 3; ++k)
+        {
+            total_value_deriv[k] = totals.value_deriv[k];
+            total_weight_deriv[k] = totals.weight_deriv[k];
+            total_color[k] = totals.color[k];
+        }
+    }
+    else
+#endif
+    {
+        for (std::size_t i = 0; i < samples.size(); ++i)
+        {
+            Sample const& sample = *samples[i];
+            if (sample.scale > sample_max_scale)
+                continue;
 
-        /* Incrementally update basis and weight. */
-        total_value += value * weight * sample.confidence;
-        total_weight += weight * sample.confidence;
-        total_value_deriv += (value_deriv * weight + weight_deriv * value)
-            * sample.confidence;
-        total_weight_deriv += weight_deriv * sample.confidence;
+            /* Evaluate basis and weight function. */
+            double value, weight;
+            math::Vector<double, 3> value_deriv, weight_deriv;
+            evaluate(voxel_pos, sample, &value, &weight,
+                &value_deriv, &weight_deriv);
 
-        /* Incrementally update color. */
-        double const color_weight = gaussian_normalized<double>
-            (sample.scale / 5.0f, voxel_pos - sample.pos) * sample.confidence;
-        total_scale += sample.scale * color_weight;
-        total_color += sample.color * color_weight;
-        total_color_weight += color_weight;
+            /* Incrementally update basis and weight. */
+            total_value += value * weight * sample.confidence;
+            total_weight += weight * sample.confidence;
+            total_value_deriv += (value_deriv * weight + weight_deriv * value)
+                * sample.confidence;
+            total_weight_deriv += weight_deriv * sample.confidence;
+
+            /* Incrementally update color. */
+            double const color_weight = gaussian_normalized<double>
+                (sample.scale / 5.0f, voxel_pos - sample.pos) * sample.confidence;
+            total_scale += sample.scale * color_weight;
+            total_color += sample.color * color_weight;
+            total_color_weight += color_weight;
+        }
     }
 
     /* Compute final voxel data. */

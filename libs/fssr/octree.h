@@ -11,6 +11,7 @@
 #define FSSR_OCTREE_HEADER
 
 #include <vector>
+#include <limits>
 #include <string>
 #include <cstdint>
 
@@ -46,6 +47,8 @@ public:
         Node* parent;
         int mc_index;
         std::vector<Sample> samples;
+        /* Largest sample scale in the subtree, see compute_subtree_scales(). */
+        float max_scale;
     };
 
     /**
@@ -146,6 +149,13 @@ public:
         std::vector<Sample const*>* result) const;
 
     /**
+     * Computes the largest sample scale for every subtree, which allows
+     * influence_query() to rule out nodes more tightly. Must be called again
+     * after the samples in the octree changed.
+     */
+    void compute_subtree_scales (void);
+
+    /**
      * Refines the octree by subdividing all leaves.
      */
     void refine_octree (void);
@@ -184,9 +194,10 @@ private:
     void get_samples_per_level (std::vector<std::size_t>* stats,
         Node const* node, std::size_t level) const;
     void influence_query (math::Vec3d const& pos, double factor,
-        std::vector<Sample const*>* result, Iterator const& iter,
-        math::Vec3d const& parent_node_center) const;
+        std::vector<Sample const*>* result, Node const* node,
+        double node_size, math::Vec3d const& node_center) const;
     void limit_octree_level (Node* node, Node* parent, int level);
+    float compute_subtree_scales (Node* node);
 
 private:
     /* The root node with its center and side length. */
@@ -206,7 +217,8 @@ private:
 
 inline
 Octree::Node::Node (void)
-    : children(nullptr), parent(nullptr)
+    : children(nullptr), parent(nullptr),
+      max_scale(std::numeric_limits<float>::max())
 {
 }
 
@@ -311,7 +323,9 @@ Octree::influence_query (math::Vec3d const& pos, double factor,
     std::vector<Sample const*>* result) const
 {
     result->resize(0);
-    this->influence_query(pos, factor, result, this->get_iterator_for_root(),
+    if (this->root == nullptr)
+        throw std::logic_error("Iterator request on empty octree");
+    this->influence_query(pos, factor, result, this->root, this->root_size,
         this->root_center);
 }
 

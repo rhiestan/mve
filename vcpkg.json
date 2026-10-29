@@ -10,6 +10,10 @@
       "default-features": false,
       "features": [ "jpeg", "zip" ]
     },
+    {
+      "name": "highway",
+      "features": [ "contrib" ]
+    },
     "mimalloc",
     "zlib",
     "gtest"
