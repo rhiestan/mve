@@ -7,12 +7,14 @@
  * of the BSD 3-Clause license. See the LICENSE.txt file for details.
  */
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <stdexcept>
 #include <set>
 #include <ctime>
+#include <vector>
 
 #include "math/vector.h"
 #include "math/functions.h"
@@ -350,6 +352,18 @@ DMRecon::processQueue()
                   << std::endl;
     lastStatus = progress.filled;
 
+    /* Result of optimizing one queue entry. */
+    struct BatchItem
+    {
+        QueueData data;
+        math::Vec3f normal;
+        bool valid;
+    };
+
+    std::size_t const batchSize = std::max(1u, settings.queueBatchSize);
+    std::vector<BatchItem> batch;
+    batch.reserve(batchSize);
+
     while (!prQueue.empty() && !progress.cancelled)
     {
         progress.queueSize = prQueue.size();
@@ -362,72 +376,77 @@ DMRecon::processQueue()
                           << std::endl;
             lastStatus = progress.filled;
         }
-        QueueData tmpData = prQueue.top();
-        prQueue.pop();
-        ++count;
-        float x = tmpData.x;
-        float y = tmpData.y;
-        int index = y * this->width + x;
-        if (refV->confImg->at(index) > tmpData.confidence) {
-            continue ;
-        }
-        PatchOptimization patch(views, settings, x, y, tmpData.depth,
-            tmpData.dz_i, tmpData.dz_j, neighViews, tmpData.localViewIDs);
-        patch.doAutoOptimization();
-        tmpData.confidence = patch.computeConfidence();
-        if (tmpData.confidence == 0) {
-            continue;
+
+        /* Pop the best entries that are still worth processing. */
+        batch.clear();
+        while (batch.size() < batchSize && !prQueue.empty())
+        {
+            BatchItem item;
+            item.data = prQueue.top();
+            prQueue.pop();
+            ++count;
+            int const index = item.data.y * this->width + item.data.x;
+            if (refV->confImg->at(index) > item.data.confidence)
+                continue;
+            batch.push_back(item);
         }
 
-        float new_depth = patch.getDepth();
-        tmpData.depth = new_depth;
-        tmpData.dz_i = patch.getDzI();
-        tmpData.dz_j = patch.getDzJ();
-        math::Vec3f normal = patch.getNormal();
-        tmpData.localViewIDs = patch.getLocalViewIDs();
-        if (refV->confImg->at(index) <= 0) {
-            ++progress.filled;
+        /* Optimize the entries of the batch, concurrently if requested. */
+        std::ptrdiff_t const batchCount = batch.size();
+#pragma omp parallel for schedule(dynamic, 1) num_threads(settings.threads)         if (batchCount > 1 && settings.threads > 1)
+        for (std::ptrdiff_t i = 0; i < batchCount; ++i)
+        {
+            BatchItem& item = batch[i];
+            QueueData& tmpData = item.data;
+            PatchOptimization patch(views, settings, tmpData.x, tmpData.y,
+                tmpData.depth, tmpData.dz_i, tmpData.dz_j, neighViews,
+                tmpData.localViewIDs);
+            patch.doAutoOptimization();
+            tmpData.confidence = patch.computeConfidence();
+            item.valid = (tmpData.confidence != 0);
+            if (!item.valid)
+                continue;
+            tmpData.depth = patch.getDepth();
+            tmpData.dz_i = patch.getDzI();
+            tmpData.dz_j = patch.getDzJ();
+            tmpData.localViewIDs = patch.getLocalViewIDs();
+            item.normal = patch.getNormal();
         }
-        if (refV->confImg->at(index) < tmpData.confidence) {
-            refV->depthImg->at(index) = tmpData.depth;
-            refV->normalImg->at(index, 0) = normal[0];
-            refV->normalImg->at(index, 1) = normal[1];
-            refV->normalImg->at(index, 2) = normal[2];
-            refV->dzImg->at(index, 0) = tmpData.dz_i;
-            refV->dzImg->at(index, 1) = tmpData.dz_j;
-            refV->confImg->at(index) = tmpData.confidence;
 
-            // left
-            tmpData.x = x - 1; tmpData.y = y;
-            index = tmpData.y * this->width + tmpData.x;
-            if (refV->confImg->at(index) < tmpData.confidence - 0.05f ||
-                refV->confImg->at(index) == 0.f)
+        /* Apply the results sequentially in queue order. */
+        for (BatchItem& item : batch)
+        {
+            if (!item.valid)
+                continue;
+            QueueData& tmpData = item.data;
+            math::Vec3f const& normal = item.normal;
+            int const x = tmpData.x;
+            int const y = tmpData.y;
+            int index = y * this->width + x;
+            if (refV->confImg->at(index) <= 0)
+                ++progress.filled;
+            if (refV->confImg->at(index) < tmpData.confidence)
             {
-                prQueue.push(tmpData);
-            }
-            // right
-            tmpData.x = x + 1; tmpData.y = y;
-            index = tmpData.y * this->width + tmpData.x;
-            if (refV->confImg->at(index) < tmpData.confidence - 0.05f ||
-                refV->confImg->at(index) == 0.f)
-            {
-                prQueue.push(tmpData);
-            }
-            // top
-            tmpData.x = x; tmpData.y = y - 1;
-            index = tmpData.y * this->width + tmpData.x;
-            if (refV->confImg->at(index) < tmpData.confidence - 0.05f ||
-                refV->confImg->at(index) == 0.f)
-            {
-                prQueue.push(tmpData);
-            }
-            // bottom
-            tmpData.x = x; tmpData.y = y + 1;
-            index = tmpData.y * this->width + tmpData.x;
-            if (refV->confImg->at(index) < tmpData.confidence - 0.05f ||
-                refV->confImg->at(index) == 0.f)
-            {
-                prQueue.push(tmpData);
+                refV->depthImg->at(index) = tmpData.depth;
+                refV->normalImg->at(index, 0) = normal[0];
+                refV->normalImg->at(index, 1) = normal[1];
+                refV->normalImg->at(index, 2) = normal[2];
+                refV->dzImg->at(index, 0) = tmpData.dz_i;
+                refV->dzImg->at(index, 1) = tmpData.dz_j;
+                refV->confImg->at(index) = tmpData.confidence;
+
+                /* Queue the four neighbors: left, right, top, bottom. */
+                static int const dx[4] = { -1, 1, 0, 0 };
+                static int const dy[4] = { 0, 0, -1, 1 };
+                for (int n = 0; n < 4; ++n)
+                {
+                    tmpData.x = x + dx[n];
+                    tmpData.y = y + dy[n];
+                    index = tmpData.y * this->width + tmpData.x;
+                    if (refV->confImg->at(index) < tmpData.confidence - 0.05f ||
+                        refV->confImg->at(index) == 0.f)
+                        prQueue.push(tmpData);
+                }
             }
         }
     }

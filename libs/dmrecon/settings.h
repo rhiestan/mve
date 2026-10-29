@@ -49,6 +49,17 @@ struct Settings
     bool keepDzMap = false;
     bool keepConfidenceMap = false;
     bool quiet = false;
+
+    /**
+     * Number of queue entries optimized concurrently per step of the
+     * region growing. Results are applied in queue order, so the output is
+     * deterministic and independent of the thread count. A value of 1 gives
+     * the original strictly sequential best-first behavior.
+     */
+    unsigned int queueBatchSize = 1;
+
+    /** Number of threads used to optimize the entries of a batch. */
+    int threads = 1;
 };
 
 MVS_NAMESPACE_END

@@ -9,7 +9,11 @@
 
 #include <iomanip>
 #include <iostream>
+#include <algorithm>
 #include <cstdlib>
+#ifdef _OPENMP
+#   include <omp.h>
+#endif
 
 #include "dmrecon/settings.h"
 #include "dmrecon/dmrecon.h"
@@ -39,6 +43,8 @@ struct AppSettings
     int max_pixels = 1500000;
     bool force_recon = false;
     bool write_ply = false;
+    int num_threads = 0;
+    int parallel_views = 0;
 #ifdef _WIN32
     ProgressStyle progress_style = PROGRESS_SIMPLE;
 #else
@@ -155,9 +161,16 @@ main (int argc, char** argv)
         "progress output style: 'silent', 'simple' or 'fancy'");
     args.add_option('\0', "force", false,
         "Reconstruct and overwrite existing depthmaps");
+    args.add_option('\0', "batch-size", true,
+        "queue entries optimized concurrently, 1 = sequential [32]");
+    args.add_option('\0', "threads", true,
+        "total number of threads [all cores]");
+    args.add_option('\0', "parallel-views", true,
+        "views reconstructed concurrently [auto]");
     args.parse(argc, argv);
 
     AppSettings conf;
+    conf.mvs.queueBatchSize = 32;
     conf.scene_path = args.get_nth_nonopt(0);
 
     util::ArgResult const* arg;
@@ -210,6 +223,12 @@ main (int argc, char** argv)
             }
 
         }
+        else if (arg->opt->lopt == "batch-size")
+            conf.mvs.queueBatchSize = std::max(1, arg->get_arg<int>());
+        else if (arg->opt->lopt == "parallel-views")
+            conf.parallel_views = std::max(1, arg->get_arg<int>());
+        else if (arg->opt->lopt == "threads")
+            conf.num_threads = std::max(1, arg->get_arg<int>());
         else if (arg->opt->lopt == "force")
             conf.force_recon = true;
         else
@@ -247,6 +266,28 @@ main (int argc, char** argv)
     if (conf.progress_style == PROGRESS_FANCY)
         fancyProgressPrinter.start();
 
+    /*
+     * Thread layout: views are reconstructed concurrently (outer level), and
+     * the threads left over are used within a view (inner level).
+     */
+    int total_threads = 1;
+#ifdef _OPENMP
+    total_threads = conf.num_threads > 0
+        ? conf.num_threads : omp_get_max_threads();
+    omp_set_max_active_levels(2);
+#endif
+    int outer_threads = 1;
+    if (conf.master_id < 0)
+    {
+        std::size_t num_recon = conf.view_ids.empty()
+            ? scene->get_views().size() : conf.view_ids.size();
+        outer_threads = static_cast<int>(std::max<std::size_t>(1,
+            std::min<std::size_t>(num_recon, total_threads)));
+        if (conf.parallel_views > 0)
+            outer_threads = std::min(conf.parallel_views, total_threads);
+    }
+    conf.mvs.threads = std::max(1, total_threads / outer_threads);
+
     util::WallTimer timer;
     if (conf.master_id >= 0)
     {
@@ -282,7 +323,7 @@ main (int argc, char** argv)
         }
         fancyProgressPrinter.addRefViews(conf.view_ids);
 
-#pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(dynamic, 1) num_threads(outer_threads)
         for (std::size_t i = 0; i < conf.view_ids.size(); ++i)
         {
             std::size_t id = conf.view_ids[i];
