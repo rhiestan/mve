@@ -22,8 +22,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-# Same as the Makefiles: -g -O3, and no -DNDEBUG (asserts stay enabled).
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g" CACHE STRING "" FORCE)
+# Same as the Makefiles: -O3 and no -DNDEBUG (asserts stay enabled). Debug
+# information is only needed for profiling: configure with
+# -DCMAKE_CXX_FLAGS_RELEASE="-O3 -g".
+set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "")
 
 find_package(JPEG REQUIRED)
 find_package(PNG REQUIRED)
