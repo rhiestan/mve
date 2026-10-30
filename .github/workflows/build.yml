@@ -78,6 +78,14 @@ jobs:
     - name: Set VCPKG_ROOT
       run: echo "VCPKG_ROOT=$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')/vcpkg" >> "$GITHUB_ENV"
 
+    # vcpkg compares the path with the instances it finds, so it must not
+    # end in a backslash as VSINSTALLDIR does.
+    - name: Set the Visual Studio path for vcpkg
+      if: runner.os == 'Windows'
+      run: |
+        dir="${VSINSTALLDIR%\\}"
+        echo "MVE_VS_INSTALL_DIR=${dir//\\//}" >> "$GITHUB_ENV"
+
     - name: Bootstrap vcpkg (Windows)
       if: runner.os == 'Windows'
       shell: cmd

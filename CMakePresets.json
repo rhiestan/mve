@@ -35,7 +35,7 @@
       "inherits": "windows-clang",
       "displayName": "Windows, Clang (MSVC target), CI (Visual Studio from the environment)",
       "environment": {
-        "VCPKG_VISUAL_STUDIO_PATH": "$penv{VSINSTALLDIR}"
+        "VCPKG_VISUAL_STUDIO_PATH": "$penv{MVE_VS_INSTALL_DIR}"
       }
     },
     {
