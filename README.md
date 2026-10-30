@@ -1,4 +1,4 @@
-# MVE -- The Multi-View Environemnt
+# MVE -- The Multi-View Environment
 
 [![Build Status](https://github.com/simonfuhrmann/mve/actions/workflows/main.yml/badge.svg)](https://github.com/simonfuhrmann/mve/actions/workflows/main.yml)
 
