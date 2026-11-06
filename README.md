@@ -1,3 +1,5 @@
+> **Fork with performance optimizations.** This is a fork of [simonfuhrmann/mve](https://github.com/simonfuhrmann/mve). It adds a CMake/vcpkg build with CI for Windows, Linux and macOS and performance optimizations; see [perfopt.md](perfopt.md) for what was done. The changes are on the `perfopt` branch (the default branch of this fork), `master` tracks the upstream repository.
+
 # MVE -- The Multi-View Environment
 
 [![Build Status](https://github.com/simonfuhrmann/mve/actions/workflows/main.yml/badge.svg)](https://github.com/simonfuhrmann/mve/actions/workflows/main.yml)
