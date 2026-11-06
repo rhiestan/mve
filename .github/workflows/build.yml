@@ -7,10 +7,10 @@ name: Build command-line tools
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "perfopt" ]
     tags: [ "*" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "perfopt" ]
   workflow_dispatch:
 
 permissions:
